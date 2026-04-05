@@ -1072,14 +1072,15 @@ int funnel_stream_init_gbm(struct funnel_stream *stream, int gbm_fd) {
             if (errno == ENOENT) {
                 // Syncobj does not exist, but flags are supported
                 stream->feat.timeline_sync_import_export = true;
-            } else {
-                // Create a dummy syncobj to use for transfers
-                int ret = drmSyncobjCreate(fd, 0, &stream->dummy_syncobj);
-                assert(ret >= 0);
             }
         }
 
 #endif
+        if (!stream->feat.timeline_sync_import_export) {
+            // Import/export fallback paths transfer through a scratch syncobj.
+            ret = drmSyncobjCreate(fd, 0, &stream->dummy_syncobj);
+            assert(ret >= 0);
+        }
     }
 
     drmVersion *ver = drmGetVersion(fd);
@@ -1349,6 +1350,7 @@ int funnel_stream_validate_sync(struct funnel_stream *stream,
         }
         if (*frontend == FUNNEL_SYNC_BOTH)
             *frontend = FUNNEL_SYNC_IMPLICIT;
+        break;
     default:
         return -EINVAL;
     }
