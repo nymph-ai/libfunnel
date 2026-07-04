@@ -711,6 +711,23 @@ void funnel_buffer_get_size(struct funnel_buffer *buf, uint32_t *pwidth,
                             uint32_t *pheight);
 
 /**
+ * Prime a DMA-BUF backed buffer for external GPU import.
+ *
+ * Some drivers only make a freshly-written imported DMA-BUF visible to a
+ * separate GL/EGL consumer after the fd has gone through a CPU sync/mmap path
+ * at least once. This is intended for producer-side first use after rendering
+ * into the buffer and before enqueueing it to PipeWire.
+ *
+ * @sync-ext
+ *
+ * @param buf Buffer @borrowed
+ * @return_err
+ * @retval -EINVAL Buffer is invalid or not DMA-BUF backed
+ * @retval -errno DMA-BUF sync or mmap failed
+ */
+int funnel_buffer_prime_dmabuf(struct funnel_buffer *buf);
+
+/**
  * Set an arbitrary user data pointer for a buffer.
  *
  * The user is responsible for managing the lifetime of this object.
