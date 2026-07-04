@@ -13,6 +13,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -1558,6 +1560,10 @@ int funnel_stream_configure(struct funnel_stream *stream) {
             PW_KEY_MEDIA_TYPE, "Video",
             PW_KEY_MEDIA_CLASS, "Stream/Output/Video",
             PW_KEY_MEDIA_ROLE, "Production",
+            PW_KEY_NODE_AUTOCONNECT, "false",
+            "node.dont-fallback", "true",
+            "node.dont-reconnect", "true",
+            "node.dont-move", "true",
             PW_KEY_NODE_SUPPORTS_LAZY, lazy ? "1" : NULL,
             PW_KEY_NODE_SUPPORTS_REQUEST, request ? "1" : NULL,
             PW_KEY_PRIORITY_DRIVER, driver_prio,
@@ -2053,6 +2059,49 @@ void funnel_buffer_get_size(struct funnel_buffer *buf, uint32_t *width,
                             uint32_t *height) {
     *width = buf->width;
     *height = buf->height;
+}
+
+int funnel_buffer_prime_dmabuf(struct funnel_buffer *buf) {
+    if (!buf || buf->fds[0] < 0 || buf->height == 0 ||
+        buf->stream->cur.strides[0] == 0)
+        return -EINVAL;
+    if (buf->dmabuf_primed)
+        return 0;
+
+    size_t size = (size_t)buf->stream->cur.strides[0] * buf->height;
+    struct dma_buf_sync sync = {
+        .flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ,
+    };
+    int ret = ioctl(buf->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
+    if (ret < 0)
+        return -errno;
+
+    void *mapped = mmap(NULL, size, PROT_READ, MAP_SHARED, buf->fds[0], 0);
+    int saved_errno = errno;
+    if (mapped == MAP_FAILED) {
+        sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
+        ioctl(buf->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
+        return -saved_errno;
+    }
+
+    long page_size = sysconf(_SC_PAGESIZE);
+    size_t step = page_size > 0 ? (size_t)page_size : 4096;
+    volatile const uint8_t *bytes = mapped;
+    volatile uint8_t sink = 0;
+    for (size_t offset = 0; offset < size; offset += step)
+        sink ^= bytes[offset];
+    sink ^= bytes[size - 1];
+    (void)sink;
+
+    munmap(mapped, size);
+
+    sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
+    ret = ioctl(buf->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
+    if (ret < 0)
+        return -errno;
+
+    buf->dmabuf_primed = true;
+    return 0;
 }
 
 void funnel_buffer_set_user_data(struct funnel_buffer *buf, void *opaque) {

@@ -178,6 +178,7 @@ struct funnel_buffer {
     struct funnel_sync_point acquire;
     struct funnel_sync_point release;
     bool release_sync_file_set;
+    bool dmabuf_primed;
 
     /// Workaround for nouveau/NVK dma-buf bug?
     uint64_t sent_count;
